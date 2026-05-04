@@ -161,14 +161,19 @@
 
     .bookmark-item {
       display: flex;
-      align-items: center;
-      gap: 0.75rem;
+      flex-direction: column;
       padding: 0.75rem 0.9rem;
       background: #f9fafb;
       border-radius: 8px;
       border: 1.5px solid #f3f4f6;
       transition: border-color 0.15s, box-shadow 0.15s;
       animation: slideIn 0.2s ease;
+    }
+
+    .item-main {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
     }
 
     @keyframes slideIn {
@@ -224,7 +229,8 @@
 
     .bookmark-link:hover .bookmark-title { color: #6366f1; }
 
-    .btn-delete {
+    .btn-delete,
+    .btn-move {
       background: none;
       border: none;
       cursor: pointer;
@@ -238,10 +244,63 @@
       transition: color 0.15s, background 0.15s;
     }
 
-    .btn-delete:hover {
-      color: #ef4444;
-      background: #fef2f2;
+    .btn-delete:hover { color: #ef4444; background: #fef2f2; }
+    .btn-move:hover   { color: #6366f1; background: #eef2ff; }
+    .btn-move.active  { color: #6366f1; }
+
+    /* Move picker (inline, shown below item-main) */
+    .move-picker {
+      margin-top: 0.6rem;
+      padding-top: 0.6rem;
+      border-top: 1px solid #ececec;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
     }
+
+    .move-label {
+      font-size: 0.78rem;
+      color: #6b7280;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    .move-picker select {
+      flex: 1;
+      min-width: 120px;
+      padding: 0.35rem 2rem 0.35rem 0.6rem;
+      font-size: 0.85rem;
+    }
+
+    .move-new-row {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      width: 100%;
+      margin-top: 0.35rem;
+    }
+
+    .move-new-input {
+      flex: 1;
+      padding: 0.35rem 0.6rem !important;
+      font-size: 0.85rem !important;
+    }
+
+    .btn-move-confirm {
+      background: #6366f1;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+
+    .btn-move-confirm:hover { background: #4f46e5; }
 
     .empty-state {
       text-align: center;
@@ -269,6 +328,42 @@
     #search-input {
       padding-left: 2.25rem;
     }
+
+    /* Folder select */
+    select {
+      padding: 0.6rem 2rem 0.6rem 0.85rem;
+      border: 1.5px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      color: #1a1a2e;
+      outline: none;
+      transition: border-color 0.15s;
+      width: 100%;
+      background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2 4l4 4 4-4' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E") no-repeat right 0.75rem center;
+      appearance: none;
+      cursor: pointer;
+    }
+
+    select:focus {
+      border-color: #6366f1;
+      box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+    }
+
+    /* Folder group headers in bookmark list */
+    .folder-header-item {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 0.2rem 0.25rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-top: 0.25rem;
+    }
+
+    .folder-header-item:first-child { margin-top: 0; }
   </style>
 </head>
 <body>
@@ -293,6 +388,18 @@
               <label for="title-input">Title</label>
               <input type="text" id="title-input" placeholder="My favorite site" autocomplete="off" />
               <span class="error-msg" id="title-error">Please enter a title.</span>
+            </div>
+            <div class="field">
+              <label for="folder-select">Folder</label>
+              <select id="folder-select">
+                <option value="">General list (no folder)</option>
+                <option value="__new__">+ New folder…</option>
+              </select>
+            </div>
+            <div class="field" id="new-folder-field" style="display:none">
+              <label for="new-folder-input">New folder name</label>
+              <input type="text" id="new-folder-input" placeholder="e.g. Work, Reading…" autocomplete="off" />
+              <span class="error-msg" id="folder-error">Please enter a folder name.</span>
             </div>
             <button type="submit" class="btn-add">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -350,6 +457,90 @@
       catch { return false; }
     }
 
+    function escapeHtml(str) {
+      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+
+    function escapeAttr(str) {
+      try {
+        const url = new URL(str);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '#';
+      } catch { return '#'; }
+      return escapeHtml(str);
+    }
+
+    function getFolders(bookmarks) {
+      return [...new Set(bookmarks.filter(b => b.folder).map(b => b.folder))].sort();
+    }
+
+    function populateFolderSelect(bookmarks) {
+      const select = document.getElementById('folder-select');
+      const prev = select.value;
+      select.innerHTML = '<option value="">General list (no folder)</option>';
+      getFolders(bookmarks).forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.textContent = f;
+        select.appendChild(opt);
+      });
+      const newOpt = document.createElement('option');
+      newOpt.value = '__new__';
+      newOpt.textContent = '+ New folder…';
+      select.appendChild(newOpt);
+      if ([...select.options].some(o => o.value === prev)) select.value = prev;
+    }
+
+    const FOLDER_ICON = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z" stroke="#9ca3af" stroke-width="1.6" stroke-linejoin="round"/>
+    </svg>`;
+
+    function buildMoveOptions(currentFolder) {
+      const folders = getFolders(load());
+      let html = `<option value=""${!currentFolder ? ' selected' : ''}>General list${!currentFolder ? ' (current)' : ''}</option>`;
+      folders.forEach(f => {
+        html += `<option value="${escapeHtml(f)}"${f === currentFolder ? ' selected' : ''}>${escapeHtml(f)}${f === currentFolder ? ' (current)' : ''}</option>`;
+      });
+      html += `<option value="__new__">+ New folder…</option>`;
+      return html;
+    }
+
+    function renderItem({ bm, i }) {
+      const favicon = faviconUrl(bm.url);
+      const faviconImg = favicon
+        ? `<img class="favicon" src="${favicon}" alt="" onerror="this.style.display='none'" />`
+        : '';
+      return `
+        <li class="bookmark-item" data-index="${i}">
+          <div class="item-main">
+            <a class="bookmark-link" href="${escapeAttr(bm.url)}" target="_blank" rel="noopener noreferrer">
+              ${faviconImg}
+              <div class="bookmark-info">
+                <div class="bookmark-title">${escapeHtml(bm.title)}</div>
+                <div class="bookmark-url">${escapeHtml(bm.url)}</div>
+              </div>
+            </a>
+            <button class="btn-move" data-index="${i}" aria-label="Move bookmark" title="Move to folder">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2 5h11M10 2.5l3 2.5-3 2.5M13 10H2M5 7.5L2 10l3 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button class="btn-delete" data-index="${i}" aria-label="Delete bookmark" title="Delete">
+              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M2 4h11M6 4V2.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5V4m2 0-.6 8.1a1 1 0 0 1-1 .9H5.6a1 1 0 0 1-1-.9L4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+          </div>
+          <div class="move-picker" id="move-picker-${i}" style="display:none">
+            <span class="move-label">Move to:</span>
+            <select class="move-select" data-index="${i}">${buildMoveOptions(bm.folder)}</select>
+            <div class="move-new-row" id="move-new-row-${i}" style="display:none">
+              <input class="move-new-input" id="move-new-input-${i}" type="text" placeholder="New folder name" autocomplete="off" />
+              <button class="btn-move-confirm" data-index="${i}">Move</button>
+            </div>
+          </div>
+        </li>`;
+    }
+
     function render() {
       const bookmarks = load();
       const query = (document.getElementById('search-input')?.value || '').toLowerCase().trim();
@@ -358,12 +549,10 @@
 
       const entries = bookmarks
         .map((bm, i) => ({ bm, i }))
-        .filter(({ bm }) =>
-          !query ||
-          bm.title.toLowerCase().startsWith(query)
-        );
+        .filter(({ bm }) => !query || bm.title.toLowerCase().startsWith(query));
 
       badge.textContent = bookmarks.length;
+      populateFolderSelect(bookmarks);
 
       if (entries.length === 0) {
         list.innerHTML = query
@@ -383,48 +572,35 @@
         return;
       }
 
-      list.innerHTML = entries.map(({ bm, i }) => {
-        const favicon = faviconUrl(bm.url);
-        const faviconImg = favicon
-          ? `<img class="favicon" src="${favicon}" alt="" onerror="this.style.display='none'" />`
-          : '';
-        return `
-          <li class="bookmark-item" data-index="${i}">
-            <a class="bookmark-link" href="${escapeAttr(bm.url)}" target="_blank" rel="noopener noreferrer">
-              ${faviconImg}
-              <div class="bookmark-info">
-                <div class="bookmark-title">${escapeHtml(bm.title)}</div>
-                <div class="bookmark-url">${escapeHtml(bm.url)}</div>
-              </div>
-            </a>
-            <button class="btn-delete" data-index="${i}" aria-label="Delete bookmark" title="Delete">
-              <svg width="15" height="15" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M2 4h11M6 4V2.5a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 .5.5V4m2 0-.6 8.1a1 1 0 0 1-1 .9H5.6a1 1 0 0 1-1-.9L4 4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-            </button>
-          </li>`;
-      }).join('');
-    }
+      const visibleFolders = getFolders(entries.map(({ bm }) => bm));
+      const hasFolders = visibleFolders.length > 0;
+      const ungrouped = entries.filter(({ bm }) => !bm.folder);
 
-    function escapeHtml(str) {
-      return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    }
+      let html = '';
 
-    function escapeAttr(str) {
-      // Only allow http/https to prevent javascript: URLs
-      try {
-        const url = new URL(str);
-        if (url.protocol !== 'http:' && url.protocol !== 'https:') return '#';
-      } catch { return '#'; }
-      return escapeHtml(str);
+      if (hasFolders && ungrouped.length > 0) {
+        html += `<li class="folder-header-item">${FOLDER_ICON} General</li>`;
+      }
+      html += ungrouped.map(renderItem).join('');
+
+      for (const folder of visibleFolders) {
+        const items = entries.filter(({ bm }) => bm.folder === folder);
+        html += `<li class="folder-header-item">${FOLDER_ICON} ${escapeHtml(folder)}</li>`;
+        html += items.map(renderItem).join('');
+      }
+
+      list.innerHTML = html;
     }
 
     document.getElementById('bookmark-form').addEventListener('submit', e => {
       e.preventDefault();
       const urlInput = document.getElementById('url-input');
       const titleInput = document.getElementById('title-input');
+      const folderSelect = document.getElementById('folder-select');
+      const newFolderInput = document.getElementById('new-folder-input');
       const urlError = document.getElementById('url-error');
       const titleError = document.getElementById('title-error');
+      const folderError = document.getElementById('folder-error');
 
       let valid = true;
 
@@ -449,29 +625,107 @@
         titleError.style.display = 'none';
       }
 
+      let folder = null;
+      if (folderSelect.value === '__new__') {
+        const newName = newFolderInput.value.trim();
+        if (!newName) {
+          folderError.style.display = 'block';
+          valid = false;
+        } else {
+          folderError.style.display = 'none';
+          folder = newName;
+        }
+      } else if (folderSelect.value) {
+        folder = folderSelect.value;
+      }
+
       if (!valid) return;
 
       const bookmarks = load();
-      bookmarks.unshift({ url, title, addedAt: Date.now() });
+      bookmarks.unshift({ url, title, addedAt: Date.now(), folder });
       save(bookmarks);
       render();
 
       urlInput.value = '';
       titleInput.value = '';
+      folderSelect.value = '';
+      newFolderInput.value = '';
+      document.getElementById('new-folder-field').style.display = 'none';
       urlInput.focus();
     });
 
     document.getElementById('bookmark-list').addEventListener('click', e => {
-      const btn = e.target.closest('.btn-delete');
-      if (!btn) return;
-      const index = parseInt(btn.dataset.index, 10);
+      const deleteBtn = e.target.closest('.btn-delete');
+      if (deleteBtn) {
+        const index = parseInt(deleteBtn.dataset.index, 10);
+        const bookmarks = load();
+        bookmarks.splice(index, 1);
+        save(bookmarks);
+        render();
+        return;
+      }
+
+      const moveBtn = e.target.closest('.btn-move');
+      if (moveBtn) {
+        const index = parseInt(moveBtn.dataset.index, 10);
+        const picker = document.getElementById(`move-picker-${index}`);
+        const isOpen = picker.style.display !== 'none';
+        // Close all open pickers
+        document.querySelectorAll('.move-picker').forEach(p => p.style.display = 'none');
+        document.querySelectorAll('.btn-move').forEach(b => b.classList.remove('active'));
+        if (!isOpen) {
+          picker.style.display = '';
+          moveBtn.classList.add('active');
+        }
+        return;
+      }
+
+      const confirmBtn = e.target.closest('.btn-move-confirm');
+      if (confirmBtn) {
+        const index = parseInt(confirmBtn.dataset.index, 10);
+        const newFolder = document.getElementById(`move-new-input-${index}`).value.trim();
+        if (!newFolder) { document.getElementById(`move-new-input-${index}`).focus(); return; }
+        const bookmarks = load();
+        bookmarks[index].folder = newFolder;
+        save(bookmarks);
+        render();
+        return;
+      }
+    });
+
+    document.getElementById('bookmark-list').addEventListener('change', e => {
+      const select = e.target.closest('.move-select');
+      if (!select) return;
+      const index = parseInt(select.dataset.index, 10);
+      const newRow = document.getElementById(`move-new-row-${index}`);
+
+      if (select.value === '__new__') {
+        newRow.style.display = '';
+        document.getElementById(`move-new-input-${index}`).focus();
+        return;
+      }
+
+      newRow.style.display = 'none';
       const bookmarks = load();
-      bookmarks.splice(index, 1);
+      bookmarks[index].folder = select.value || null;
       save(bookmarks);
       render();
     });
 
     document.getElementById('search-input').addEventListener('input', render);
+
+    document.getElementById('folder-select').addEventListener('change', function () {
+      const field = document.getElementById('new-folder-field');
+      const input = document.getElementById('new-folder-input');
+      if (this.value === '__new__') {
+        field.style.display = '';
+        input.focus();
+      } else {
+        field.style.display = 'none';
+        input.value = '';
+        document.getElementById('folder-error').style.display = 'none';
+      }
+    });
 
     render();
   </script>
